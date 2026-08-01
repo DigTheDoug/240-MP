@@ -346,7 +346,7 @@ QNetworkRequest nwsRequest(const QUrl &url) {
 //
 // Open-Meteo's geocoder has no country/region filter (countryCode, country_code
 // and country are all silently ignored) and orders purely by population. So
-// "Caldwell, NJ, USA" returns Caldwell **Idaho** first, and picking the first
+// "Portland, ME, USA" returns Portland **Oregon** first, and picking the first
 // result shows confidently wrong weather with no error anywhere — the worst
 // failure this module can have. Everything below exists to prevent that.
 //
@@ -689,13 +689,13 @@ QStringList WeatherBackend::readLocationLines() const {
     return readListFile(location_file_path());
 }
 
-// "40.8398, -74.2765" or "40.8398, -74.2765, CALDWELL".
+// "42.3601, -71.0589" or "42.3601, -71.0589, BOSTON".
 //
 // Explicit coordinates are the reliable escape hatch when a place name is
 // ambiguous — they never touch the geocoder, so nothing can mis-resolve them.
 // The optional label exists because a name cannot be recovered from
 // coordinates: Open-Meteo's geocoder is forward-only, and the forecast response
-// carries only a timezone, which would label a New Jersey town "NEW YORK".
+// carries only a timezone, which would label a Massachusetts town "NEW YORK".
 bool WeatherBackend::parseCoordLine(const QString &line, double *lat, double *lon,
                                     QString *label) {
     const QStringList parts = line.split(QLatin1Char(','));
@@ -804,7 +804,7 @@ void WeatherBackend::geocodeLine(const QString &line,
         // Score every result against every qualifier and take the best. Results
         // arrive ordered by population, so a plain first-match would always pick
         // the biggest city of that name regardless of the state or country
-        // asked for — "Caldwell, NJ, USA" would land in Idaho.
+        // asked for — "Portland, ME, USA" would land in Oregon.
         QJsonObject chosen = results.first().toObject();
         if (!qualifiers.isEmpty()) {
             int bestScore = -1;
