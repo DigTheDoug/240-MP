@@ -527,6 +527,8 @@ void MpvController::onIpcReadyRead() {
                         emit skipRequested();
                     else if (msg == "cycle-sub")
                         emit subtitleCycleRequested();
+                    else if (msg == "cycle-audio")
+                        emit audioCycleRequested();
                 }
             }
             continue;
