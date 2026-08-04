@@ -200,6 +200,18 @@ At this point you can type `240mp` at any time to start up the app.  And if you 
 
 The Local Files module will be enabled by default and you can open settings to enable any other modules you would like to display.  Please see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki for details on any additional set up that may be needed for the modules you'd like to use.
 
+**If you want to use the NFC Reader module:** 
+
+Run the reader setup script once with the following command (your nfc reader will not be detected until you do):
+
+```bash
+bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/setup-nfc-reader.sh)
+```
+
+- The script grants your user access to the reader
+- for PC/SC readers like the `ACS ACR122U` it installs and configures the `pcscd` package and for `PN532 USB` based readers it adds a udev rule
+- If a group was added you'll need to log out and back in (or reboot) before the reader works
+
 **If analog / composite audio is unusually quiet:** 
 - Run `amixer sset PCM 100%`
 - If that solves it and you want to keep the level across reboots, run `sudo alsactl store`
@@ -348,6 +360,20 @@ The AppImage carries its own copy of the Wayland client libraries and uses them 
     You can update it with `~/.local/share/240-MP/bin/yt-dlp -U`. 
 
     That said, if you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`) then that will work too, the data-dir copy just provides a local to 240-MP option.
+
+    #### NFC Reader
+
+    Please use a **`PN532 USB`** reader here. It is a PN532 chip behind a USB-serial bridge, so the driver is already in the kernel and nothing needs to be installed. A read-only rootfs (like what SteamOS ships with) makes `pcscd` (needed by PC/SC readers like the `ACS ACR122U`) impractical to set up and outside of the scope of something i'd want to document for this case.
+
+    So on SteamOS there is nothing to set up at all, just plug the reader in, launch 240-MP and enable the NFC reader module. I verified this on a Steam Deck in both Desktop Mode and Gaming Mode: the reader was picked up on launch, mapped cards started playback, and tapping an unknown card wrote its starter tag file.
+
+    Should your reader not be detected (either on another x86_64 distro, or if a future SteamOS release changes device permissions) run the nfc reader setup script once from Desktop Mode to grant access:
+
+    ```bash
+    bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/setup-nfc-reader.sh)
+    ```
+
+    It writes a udev rule to `/etc/udev/rules.d/` and adds you to the serial device group, then skips the PC/SC setup automatically if it detects an immutable filesystem. Log out and back in afterwards so the group membership applies. SteamOS keeps `/etc` writable across updates so the rule should normally survive, but a major SteamOS release may reset it so if that happens just run the script again.
 
 ### Update
 
