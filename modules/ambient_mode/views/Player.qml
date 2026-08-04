@@ -7,9 +7,15 @@ FocusScope {
 
     signal goBack()
 
+    // A single picked file, or a non-empty *Paths list when the picker's SHUFFLE
+    // slot was chosen for that row — never both.
     property string videoPath:      navParams.videoPath || ""
     property string audioPath:      navParams.audioPath || ""
-    property bool   hasCustomAudio: audioPath !== ""
+    property var    videoPaths:     navParams.videoPaths || []
+    property var    audioPaths:     navParams.audioPaths || []
+    property bool   shuffleVideo:   videoPaths.length > 0
+    property bool   shuffleAudio:   audioPaths.length > 0
+    property bool   hasCustomAudio: audioPath !== "" || audioPaths.length > 0
 
     focus: true
 
@@ -53,13 +59,27 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (videoPath === "") {
+        if (videoPath === "" && videoPaths.length === 0) {
             goBack()
             return
         }
-        mpvController.loadAndPlay(videoPath, 0.0, 0, -1, [], [], true, -1, 0.0, "", hasCustomAudio, "ambient")
-        if (hasCustomAudio)
-            ambientModeBackend.startAudio(audioPath)
+
+        // Shuffling hands mpv the whole library as one playlist and lets --shuffle
+        // plus --loop-playlist=inf (from loop: true) cycle it, rather than the app
+        // detecting each clip's end and loading a new one. First entry goes in as
+        // the url, the rest as extra playlist entries.
+        var first = shuffleVideo ? videoPaths[0] : videoPath
+        var rest  = shuffleVideo ? videoPaths.slice(1) : []
+        mpvController.loadAndPlay(first, 0.0, 0, -1, [], [], true, -1, 0.0, "",
+                                  hasCustomAudio, "ambient", shuffleVideo, [], 0.0,
+                                  false, [], "", rest)
+
+        // Companion audio is a second, independent mpv process — it does its own
+        // shuffling and looping (see AmbientModeBackend::startAudio).
+        if (audioPaths.length > 0)
+            ambientModeBackend.startAudio(audioPaths, shuffleAudio)
+        else if (audioPath !== "")
+            ambientModeBackend.startAudio([audioPath], false)
     }
 
     Rectangle {

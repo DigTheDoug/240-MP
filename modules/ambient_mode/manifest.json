@@ -15,6 +15,12 @@
       "label": "Media Directory",
       "type": "directory_browser",
       "default": ""
+    },
+    {
+      "key": "auto_launch",
+      "label": "Auto-Launch Playback",
+      "type": "toggle",
+      "default": "OFF"
     }
   ]
 }
