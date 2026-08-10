@@ -19,9 +19,17 @@ public:
     Q_INVOKABLE QString  get_active_user_name();
     Q_INVOKABLE QString  get_active_server_name();
     Q_INVOKABLE QVariantList get_switchable_servers();
+    // requestId is an opaque caller-generated correlation token, echoed back on
+    // streamUrlReady/itemLoaded/itemRequestFailed so a caller sharing this
+    // singleton with other callers (see Main.qml's remote-control hand-off)
+    // can tell "is this reply actually for the call I made" rather than
+    // reacting to any emission from any caller. Optional — callers that don't
+    // need to disambiguate (Player.qml's autoplay/retry paths, Extras.qml) can
+    // omit it.
     Q_INVOKABLE void     build_stream_url(const QString &ratingKey,
                                           const QString &partKey,
-                                          const QString &sessionId);
+                                          const QString &sessionId,
+                                          const QString &requestId = QString());
 
     // Auth flow
     Q_INVOKABLE void start_pin_auth();
@@ -57,11 +65,11 @@ public:
     Q_INVOKABLE void load_next_episode(const QString &currentRatingKey);
 
     // Playback
-    Q_INVOKABLE void load_item_detail(const QString &ratingKey);
+    Q_INVOKABLE void load_item_detail(const QString &ratingKey, const QString &requestId = QString());
     Q_INVOKABLE void request_transcode(const QString &ratingKey, const QString &partKey,
                                        const QString &sessionId,
                                        const QString &audioId, const QString &subtitleId,
-                                       int offsetMs);
+                                       int offsetMs, const QString &requestId = QString());
     Q_INVOKABLE void update_timeline(const QString &ratingKey, const QString &partKey,
                                      const QString &state, int timeMs, int durationMs);
     Q_INVOKABLE void set_audio_stream(const QString &streamId, const QString &partId);
@@ -107,8 +115,13 @@ signals:
     void categoriesLoaded(const QVariant &categories);
     void capabilitiesLoaded(const QVariant &capabilities);
 
-    void itemLoaded(const QVariant &detail);
-    void streamUrlReady(const QString &url, const QString &plexToken);
+    void itemLoaded(const QVariant &detail, const QString &requestId = QString());
+    void streamUrlReady(const QString &url, const QString &plexToken, const QString &requestId = QString());
+    // Correlated failure for load_item_detail/request_transcode specifically —
+    // emitted alongside (not instead of) errorOccurred, which stays a generic
+    // firehose for the ~13 other QML listeners across the module that don't
+    // need correlation. Only requestId-aware callers should listen to this.
+    void itemRequestFailed(const QString &message, const QString &requestId);
     void childrenLoaded(const QVariant &items);
     void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);

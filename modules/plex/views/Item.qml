@@ -61,6 +61,15 @@ FocusScope {
     // transcode session built with the previously selected audio/subtitle.
     property string sessionId: newSessionId()
 
+    // Correlates plexBackend's itemLoaded/streamUrlReady/itemRequestFailed
+    // replies to the specific load_item_detail/request_transcode/
+    // build_stream_url call this view made — plexBackend is a shared instance
+    // (also driven by Main.qml's remote-control hand-off), so without this,
+    // a reply meant for a different caller could be mistaken for this view's
+    // own. Regenerated on every call (not just once per view), so a stale
+    // reply from a previous press can't land either.
+    property string myRequestId: ""
+
     function newSessionId() {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         var id = ""
@@ -80,7 +89,8 @@ FocusScope {
     Connections {
         target: plexBackend
 
-        function onItemLoaded(d) {
+        function onItemLoaded(d, requestId) {
+            if (requestId !== detailRoot.myRequestId) return
             detailRoot.detail = d
             // Set initial stream indices
             detailRoot.audioIdx = 0
@@ -97,7 +107,8 @@ FocusScope {
             }
         }
 
-        function onStreamUrlReady(url, plexToken) {
+        function onStreamUrlReady(url, plexToken, requestId) {
+            if (requestId !== detailRoot.myRequestId) return
             if (!detailRoot.detail) return
             var d = detailRoot.detail
             var audioId = d.audioStreams && d.audioStreams[detailRoot.audioIdx]
@@ -139,7 +150,8 @@ FocusScope {
             if (navListState.focusRow === 1 && items.length > 0) focusRow = 1
         }
 
-        function onErrorOccurred(msg) {
+        function onItemRequestFailed(msg, requestId) {
+            if (requestId !== detailRoot.myRequestId) return
             console.log("[Item] Error: " + msg)
             detailRoot.isLaunching = false
         }
@@ -147,7 +159,8 @@ FocusScope {
 
     Component.onCompleted: {
         if (item.ratingKey) {
-            plexBackend.load_item_detail(item.ratingKey)
+            myRequestId = Qt.md5(Date.now() + "-" + Math.random())
+            plexBackend.load_item_detail(item.ratingKey, myRequestId)
             plexBackend.load_extras(item.ratingKey)
         }
         focusRow = 0
@@ -208,16 +221,19 @@ FocusScope {
             }
 
             // Fresh session per play so Plex builds a new transcode for this
-            // exact selection instead of reusing the prior one.
+            // exact selection instead of reusing the prior one. Same for
+            // myRequestId — a stale reply from a previous press must not be
+            // mistaken for this one.
             sessionId = newSessionId()
+            myRequestId = Qt.md5(Date.now() + "-" + Math.random())
 
             if (detail.forceTranscode) {
                 // Always transcode from the start so the full timeline is seekable.
                 // The Player resumes by seeking mpv to viewOffset (see doStartPlayback),
                 // which lets the user rewind past the resume point.
-                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, 0)
+                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, 0, myRequestId)
             } else {
-                plexBackend.build_stream_url(detail.ratingKey, detail.partKey, sessionId)
+                plexBackend.build_stream_url(detail.ratingKey, detail.partKey, sessionId, myRequestId)
             }
         }
     }

@@ -273,27 +273,30 @@ Window {
     // navigate chain modules/plex/views/Item.qml uses for its own play
     // button (see REMOTE_CONTROL_DESIGN.md). PlexBackend is a single shared
     // instance, so these Connections fire alongside any Item.qml-local ones
-    // whenever that view happens to be open — the pending-ratingKey guards
-    // below are what keep this handler from reacting to itemLoaded /
-    // streamUrlReady emissions caused by ordinary in-app browsing.
-    property string _pendingRatingKey: ""
+    // whenever that view happens to be open — _pendingRequestId (echoed back
+    // on itemLoaded/streamUrlReady/itemRequestFailed) is what keeps this
+    // handler from reacting to replies meant for a local Item.qml call
+    // instead of this one, and vice versa. A ratingKey/truthiness check alone
+    // can't tell those apart since plexBackend's signals carry no caller
+    // identity of their own.
+    property string _pendingRequestId: ""
     property var _pendingDetail: null
     property string _pendingSessionId: ""
 
     Connections {
         target: remoteControlBackend
         function onPlayPlexItemRequested(ratingKey) {
-            root._pendingRatingKey = ratingKey
+            root._pendingRequestId = Qt.md5(Date.now() + "-" + Math.random())
             root._pendingDetail = null
-            plexBackend.load_item_detail(ratingKey)
+            plexBackend.load_item_detail(ratingKey, root._pendingRequestId)
         }
     }
 
     Connections {
         target: plexBackend
 
-        function onItemLoaded(d) {
-            if (root._pendingRatingKey === "" || d.ratingKey !== root._pendingRatingKey) return
+        function onItemLoaded(d, requestId) {
+            if (requestId !== root._pendingRequestId) return
             root._pendingDetail = d
             root._pendingSessionId = Qt.md5(Date.now().toString())
             // Honor Plex's own default stream selection for the item (same
@@ -304,12 +307,13 @@ Window {
             var defAudioId = d.selectedAudioId || ""
             var defSubId   = d.selectedSubtitleId || "0"
             if (d.forceTranscode)
-                plexBackend.request_transcode(d.ratingKey, d.partKey, root._pendingSessionId, defAudioId, defSubId, 0)
+                plexBackend.request_transcode(d.ratingKey, d.partKey, root._pendingSessionId, defAudioId, defSubId, 0, root._pendingRequestId)
             else
-                plexBackend.build_stream_url(d.ratingKey, d.partKey, root._pendingSessionId)
+                plexBackend.build_stream_url(d.ratingKey, d.partKey, root._pendingSessionId, root._pendingRequestId)
         }
 
-        function onStreamUrlReady(url, token) {
+        function onStreamUrlReady(url, token, requestId) {
+            if (requestId !== root._pendingRequestId) return
             if (!root._pendingDetail) return
             var d = root._pendingDetail
             var imageSubs = []
@@ -329,18 +333,21 @@ Window {
                 sessionId: root._pendingSessionId, isTranscoding: d.forceTranscode || false
             }
             moduleLoader.setSource("modules/plex/views/Player.qml", { navParams: root.appCurrentParams })
-            root._pendingRatingKey = ""
+            root._pendingRequestId = ""
             root._pendingDetail = null
         }
 
         // A pending remote play that fails to resolve (bad ratingKey, network
         // error, ...) must still clear the pending state — otherwise it can
         // wedge here indefinitely with no on-screen feedback that anything
-        // was attempted.
-        function onErrorOccurred(message) {
-            if (root._pendingRatingKey === "") return
+        // was attempted. Listening to the correlated itemRequestFailed rather
+        // than the generic errorOccurred means an unrelated error elsewhere
+        // in the app (a hub load timing out, etc.) can no longer wipe an
+        // in-flight remote request that has nothing to do with it.
+        function onItemRequestFailed(message, requestId) {
+            if (requestId !== root._pendingRequestId) return
             console.log("[RemoteControl] Plex load failed for pending remote play: " + message)
-            root._pendingRatingKey = ""
+            root._pendingRequestId = ""
             root._pendingDetail = null
         }
     }

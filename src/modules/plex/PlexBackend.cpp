@@ -747,7 +747,8 @@ QVariantList PlexBackend::get_switchable_servers() {
 
 void PlexBackend::build_stream_url(const QString &ratingKey,
                                    const QString &partKey,
-                                   const QString &sessionId) {
+                                   const QString &sessionId,
+                                   const QString &requestId) {
     QString uri = serverUrl();
     QString token = serverToken();
     // Cloud-hosted extras have part keys that already carry a query string
@@ -758,7 +759,7 @@ void PlexBackend::build_stream_url(const QString &ratingKey,
                 + "X-Plex-Client-Identifier="   + clientId()
                 + "&X-Plex-Session-Identifier=" + sessionId;
     qDebug() << "[Plex] Playback: DIRECT PLAY";
-    emit streamUrlReady(url, token);
+    emit streamUrlReady(url, token, requestId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1676,21 +1677,29 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
     };
 }
 
-void PlexBackend::load_item_detail(const QString &ratingKey) {
+void PlexBackend::load_item_detail(const QString &ratingKey, const QString &requestId) {
     QString uri = serverUrl(), token = serverToken();
     auto *reply = plexGet(QUrl(uri + "/library/metadata/" + ratingKey), token);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, ratingKey]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, ratingKey, requestId]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
-                handle498([this, ratingKey]{ load_item_detail(ratingKey); }); return;
+                handle498([this, ratingKey, requestId]{ load_item_detail(ratingKey, requestId); }); return;
             }
-            emit errorOccurred("LOAD DETAIL FAILED: " + reply->errorString()); return;
+            QString msg = "LOAD DETAIL FAILED: " + reply->errorString();
+            emit errorOccurred(msg);
+            emit itemRequestFailed(msg, requestId);
+            return;
         }
         QJsonArray metaArr = QJsonDocument::fromJson(reply->readAll())
                              .object()["MediaContainer"].toObject()["Metadata"].toArray();
-        if (metaArr.isEmpty()) { emit errorOccurred("LOAD DETAIL FAILED: empty metadata"); return; }
-        emit itemLoaded(buildItemDetail(metaArr[0].toObject()));
+        if (metaArr.isEmpty()) {
+            QString msg = "LOAD DETAIL FAILED: empty metadata";
+            emit errorOccurred(msg);
+            emit itemRequestFailed(msg, requestId);
+            return;
+        }
+        emit itemLoaded(buildItemDetail(metaArr[0].toObject()), requestId);
     });
 }
 
@@ -1860,7 +1869,7 @@ void PlexBackend::load_next_episode(const QString &currentRatingKey) {
 void PlexBackend::request_transcode(const QString &ratingKey, const QString &partKey,
                                     const QString &sessionId,
                                     const QString &audioId, const QString &subtitleId,
-                                    int offsetMs) {
+                                    int offsetMs, const QString &requestId) {
     QString uri   = serverUrl();
     QString token = serverToken();
     QString quality = videoQuality();
@@ -1903,15 +1912,18 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     auto *reply = m_nam->get(req);
     ignoreSslErrors(reply);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, token, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs]() {
+            [this, reply, token, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, requestId]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
-                handle498([this, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs]{
-                    request_transcode(ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs);
+                handle498([this, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, requestId]{
+                    request_transcode(ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, requestId);
                 }); return;
             }
-            emit errorOccurred("TRANSCODE FAILED: " + reply->errorString()); return;
+            QString msg = "TRANSCODE FAILED: " + reply->errorString();
+            emit errorOccurred(msg);
+            emit itemRequestFailed(msg, requestId);
+            return;
         }
         // The server returns a master m3u8 with a relative variant URL.
         // Parse it to find the first non-comment line, then resolve to absolute.
@@ -1931,7 +1943,7 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
             streamUrl = reply->url().toString();
         }
         qDebug() << "[Plex] Transcode stream URL for mpv:" << streamUrl;
-        emit streamUrlReady(streamUrl, token);
+        emit streamUrlReady(streamUrl, token, requestId);
     });
 }
 
