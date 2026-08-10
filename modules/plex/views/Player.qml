@@ -5,6 +5,12 @@ FocusScope {
 
     property var navParams: ({})
 
+    // Normally loaded inside modules/plex/views/Root.qml's Loader, which
+    // provides this via its own moduleRoot id — but the remote-control
+    // hand-off (Main.qml) loads this view directly, bypassing that router, so
+    // it can't rely on an ancestor id. Same literal Root.qml hardcodes.
+    property string moduleId: "com.240mp.plex"
+
     signal navigateTo(string path, var params)
     signal goBack()
     // Emitted when autoplay advances in place, so Root can repoint the BACK
@@ -389,10 +395,10 @@ FocusScope {
     Component.onCompleted: {
         initStreamIndices()
         if (streamUrl === "") return
-        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        resumeSetting = appCore.get_setting(moduleId, "resume_playback") || "ask"
         // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
         // once the user touches it, but accept the legacy "ON" string too.
-        var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
+        var autoplayRaw = appCore.get_setting(moduleId, "autoplay_next_episode")
         autoplayNext  = allowAutoplay && (autoplayRaw === true || autoplayRaw === "ON")
 
         if (resumeSetting === "ask" && viewOffset > 0) {

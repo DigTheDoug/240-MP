@@ -191,12 +191,26 @@ On a Debian/Ubuntu x86_64 build host:
 ```bash
 sudo apt-get install -y build-essential cmake \
   libdrm-dev libssl-dev libsdl2-dev libpcsclite-dev \
-  libgl1-mesa-dev libxkbcommon-dev mpv
+  libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 mpv
 ```
 
 `libpcsclite-dev` is optional and only adds PC/SC reader support to the NFC module. It is listed here because CI builds with it, so the released AppImage bundles `libpcsclite.so.1` and PC/SC works on any host running `pcscd`. Leaving it out still produces a working build — the PN532 USB driver links nothing.
 
-Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
+`libxcb-cursor0` is required by Qt's `xcb` platform plugin (`libqxcb.so`) since Qt 6.5 — without it, `scripts/build-appimage.sh`'s `linuxdeploy-plugin-qt` step fails with `ERROR: Could not find dependency: libxcb-cursor.so.0` while bundling Qt.
+
+Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7). **Note:** Ubuntu 24.04's distro Qt6 is 6.4.2, which predates `QtQuick.Effects` (added in Qt 6.5) — this app's QML uses it, so a distro-Qt build will fail to bundle that module into the AppImage. Use the online installer (or `aqtinstall`) for Qt ≥ 6.5 instead.
+
+> **If you also have a distro Qt6 installed** (e.g. `qt6-base-dev`) alongside a manually-installed Qt ≥ 6.5, `scripts/build-appimage.sh` can silently pull pieces from the wrong one even with `CMAKE_PREFIX_PATH` set correctly, in two independent ways:
+> - Its `QMAKE` auto-detect checks `PATH` before `CMAKE_PREFIX_PATH`, so a distro `qmake6` on `PATH` wins and hands `linuxdeploy-plugin-qt` the wrong Qt to bundle QML modules/plugins from.
+> - Separately, `linuxdeploy`'s own library-dependency copier resolves each `.so` the way the dynamic linker would at runtime. With no `LD_LIBRARY_PATH` set, a distro Qt registered in `ldconfig`'s cache gets copied into the bundle instead of the Qt the binary was actually built against — even though compilation itself was correct.
+>
+> The second one in particular builds successfully but fails at *launch* with `Plugin uses incompatible Qt library (...) [release]` / `Could not find the Qt platform plugin "xcb"`. Avoid both by pointing every lookup at the same Qt explicitly:
+> ```bash
+> QMAKE=/path/to/Qt/6.7.x/gcc_64/bin/qmake6 \
+> LD_LIBRARY_PATH=/path/to/Qt/6.7.x/gcc_64/lib \
+> CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 \
+> scripts/build-appimage.sh --configure
+> ```
 
 > **The bundled `mpv` must be modern (≥ 0.38)** — the app's "forced subtitles only" option (`--subs-with-matching-audio=forced`) was added in mpv 0.38, and distro packages are often older (Ubuntu 24.04 ships 0.37, 22.04 ships 0.34.1). If your distro's mpv is too old, build one first and point `MPV_BIN` at it:
 >

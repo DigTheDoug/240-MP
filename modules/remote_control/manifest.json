@@ -1,0 +1,15 @@
+{
+  "id": "com.240mp.remote_control",
+  "name": "Remote Control",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Listen for HTTP play commands from an external system (e.g. Home Assistant) on port 8420. Nothing listens on the network until this is turned on."
+    }
+  ]
+}

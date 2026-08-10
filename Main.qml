@@ -267,6 +267,84 @@ Window {
         }
     }
 
+    // --- REMOTE CONTROL PLAYBACK TRIGGER ---
+    // com.240mp.remote_control's HTTP listener hands off a bare ratingKey;
+    // this drives it through the same load-detail -> resolve-stream ->
+    // navigate chain modules/plex/views/Item.qml uses for its own play
+    // button (see REMOTE_CONTROL_DESIGN.md). PlexBackend is a single shared
+    // instance, so these Connections fire alongside any Item.qml-local ones
+    // whenever that view happens to be open — the pending-ratingKey guards
+    // below are what keep this handler from reacting to itemLoaded /
+    // streamUrlReady emissions caused by ordinary in-app browsing.
+    property string _pendingRatingKey: ""
+    property var _pendingDetail: null
+    property string _pendingSessionId: ""
+
+    Connections {
+        target: remoteControlBackend
+        function onPlayPlexItemRequested(ratingKey) {
+            root._pendingRatingKey = ratingKey
+            root._pendingDetail = null
+            plexBackend.load_item_detail(ratingKey)
+        }
+    }
+
+    Connections {
+        target: plexBackend
+
+        function onItemLoaded(d) {
+            if (root._pendingRatingKey === "" || d.ratingKey !== root._pendingRatingKey) return
+            root._pendingDetail = d
+            root._pendingSessionId = Qt.md5(Date.now().toString())
+            // Honor Plex's own default stream selection for the item (same
+            // fields Item.qml uses to seed audioIdx/subtitleIdx on a normal
+            // play) rather than a hardcoded "no subtitle" sentinel — that
+            // sentinel maps to mpv's forced-subs-only mode, which is wrong
+            // whenever the item actually has a real default subtitle track.
+            var defAudioId = d.selectedAudioId || ""
+            var defSubId   = d.selectedSubtitleId || "0"
+            if (d.forceTranscode)
+                plexBackend.request_transcode(d.ratingKey, d.partKey, root._pendingSessionId, defAudioId, defSubId, 0)
+            else
+                plexBackend.build_stream_url(d.ratingKey, d.partKey, root._pendingSessionId)
+        }
+
+        function onStreamUrlReady(url, token) {
+            if (!root._pendingDetail) return
+            var d = root._pendingDetail
+            var imageSubs = []
+            if (d.subtitleStreams) {
+                for (var k = 0; k < d.subtitleStreams.length; k++) {
+                    if (d.subtitleStreams[k].imageSubtitle) imageSubs.push(d.subtitleStreams[k].id)
+                }
+            }
+            root.appNavStack.push({ source: moduleLoader.source, params: root.appCurrentParams, listState: {} })
+            root.appCurrentParams = {
+                streamUrl: url, plexToken: token, ratingKey: d.ratingKey,
+                partKey: d.partKey, partId: d.partId, title: d.title,
+                viewOffset: d.viewOffset || 0,
+                audioStreams: d.audioStreams || [], subtitleStreams: d.subtitleStreams || [],
+                selectedAudioId: d.selectedAudioId || "", selectedSubtitleId: d.selectedSubtitleId || "0",
+                imageSubtitleIds: imageSubs,
+                sessionId: root._pendingSessionId, isTranscoding: d.forceTranscode || false
+            }
+            moduleLoader.setSource("modules/plex/views/Player.qml", { navParams: root.appCurrentParams })
+            root._pendingRatingKey = ""
+            root._pendingDetail = null
+        }
+
+        // A pending remote play that fails to resolve (bad ratingKey, network
+        // error, ...) must still clear the pending state — otherwise it can
+        // wedge here indefinitely with no on-screen feedback that anything
+        // was attempted.
+        function onErrorOccurred(message) {
+            if (root._pendingRatingKey === "") return
+            console.log("[RemoteControl] Plex load failed for pending remote play: " + message)
+            root._pendingRatingKey = ""
+            root._pendingDetail = null
+        }
+    }
+
     // --- SCREEN SAVER (Idle Tracker integration) ---
     Connections {
         target: idleTracker

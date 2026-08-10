@@ -16,3 +16,5 @@ Thumbs.db
 /.appimage-tools
 /.mpv-build
 /*.AppImage
+# Personal/local helper scripts (machine-specific paths, not for sharing)
+/scripts/local-*.sh
