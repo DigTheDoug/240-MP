@@ -262,6 +262,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             ytdlEnabled = true;
     }
 
+    // Needed here (earlier than its other use further down) so the CRT script-opts
+    // below can be folded into the single scriptOpts list before it's joined.
+    m_headlessMode = detectHeadlessMode();
+
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
@@ -271,6 +275,24 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // --panscan would blank the video (Pi 3 overlay path, 1080p Playback ON).
     if (cropUnavailable())
         scriptOpts << QStringLiteral("hide-crop=1");
+
+    // CRT Filter OSC button: hand the OSC both shader paths plus the launch-time
+    // state so it can cycle Off -> Regular -> Heavy live via mpv's own
+    // change-list command (same shape as the CROP button's panscan cycle — no
+    // round-trip to the Qt app). Session-only: the OSC's live choice doesn't
+    // persist back to the crt_filter setting, same as CROP/panscan. Desktop
+    // only — the Pi headless --vo=drm paths never apply --glsl-shaders (see
+    // appendVideoArgs), so the opts are omitted there and the OSC hides the
+    // button entirely.
+    if (!m_headlessMode) {
+        const QString regularPath = m_appRoot + "/shaders/crt-lottes-regular.glsl";
+        const QString heavyPath   = m_appRoot + "/shaders/crt-lottes-heavy.glsl";
+        if (QFile::exists(regularPath) && QFile::exists(heavyPath)) {
+            scriptOpts << QStringLiteral("crt-shader-regular=%1").arg(regularPath)
+                       << QStringLiteral("crt-shader-heavy=%1").arg(heavyPath)
+                       << QStringLiteral("crt-filter-initial=%1").arg(crtFilterState());
+        }
+    }
 
     // Hand the OSC a map of external sub-file URL -> friendly track name so it can show
     // the real subtitle name. mpv otherwise titles an external sub from its URL basename
@@ -349,6 +371,20 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (!outputLevels.isEmpty())
         args << QStringLiteral("--video-output-levels=%1").arg(outputLevels);
 
+    // CRT Filter: --glsl-shaders only takes effect under mpv's gpu/gpu-next VOs.
+    // The Pi headless paths use --vo=drm specifically to keep GPU load low (see
+    // appendVideoArgs), so this is desktop-only (macOS, X11/Wayland desktop
+    // Linux incl. Steam Deck) and silently skipped when headless. m_headlessMode
+    // was already computed earlier, before the scriptOpts block above.
+    if (!m_headlessMode) {
+        const QString shaderFile = crtFilterShaderFile();
+        if (!shaderFile.isEmpty()) {
+            const QString shaderPath = m_appRoot + "/shaders/" + shaderFile;
+            if (QFile::exists(shaderPath))
+                args << QStringLiteral("--glsl-shaders=%1").arg(shaderPath);
+        }
+    }
+
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
     connect(m_process,
@@ -360,7 +396,6 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             qWarning("[mpv] %s", out.trimmed().constData());
     });
 
-    m_headlessMode = detectHeadlessMode();
     if (m_headlessMode) {
         {
             QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -781,6 +816,26 @@ QString MpvController::videoOutputLevels() const {
         return QStringLiteral("limited");
     if (v.compare(QStringLiteral("Full"), Qt::CaseInsensitive) == 0)
         return QStringLiteral("full");
+    return {};
+}
+
+QString MpvController::crtFilterState() const {
+    if (!m_appCore)
+        return QStringLiteral("Off");
+    const QString v = m_appCore->get_setting(QString(), "crt_filter").toString();
+    if (v.compare(QStringLiteral("Regular"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("Regular");
+    if (v.compare(QStringLiteral("Heavy"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("Heavy");
+    return QStringLiteral("Off");
+}
+
+QString MpvController::crtFilterShaderFile() const {
+    const QString state = crtFilterState();
+    if (state == QLatin1String("Regular"))
+        return QStringLiteral("crt-lottes-regular.glsl");
+    if (state == QLatin1String("Heavy"))
+        return QStringLiteral("crt-lottes-heavy.glsl");
     return {};
 }
 

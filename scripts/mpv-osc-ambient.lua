@@ -30,11 +30,46 @@ local function draw_text(ass, x, y, anchor, text, fs, fc, fa)
         anchor, x, y, fs, fc, fa, text))
 end
 
+-- Set by MpvController with the resolved shader paths and the crt_filter
+-- setting's value at launch — absent entirely on the Pi headless --vo=drm
+-- paths, where --glsl-shaders has no effect, so the button hides there.
+local crt_shader_regular = mp.get_opt("crt-shader-regular")
+local crt_shader_heavy   = mp.get_opt("crt-shader-heavy")
+local crt_available = (crt_shader_regular or "") ~= "" and (crt_shader_heavy or "") ~= ""
+local crt_order = {"Off", "Regular", "Heavy"}
+local crt_state = mp.get_opt("crt-filter-initial")
+if crt_state ~= "Regular" and crt_state ~= "Heavy" then crt_state = "Off" end
+
+local function crt_shader_path(state)
+    if state == "Regular" then return crt_shader_regular end
+    if state == "Heavy"   then return crt_shader_heavy   end
+    return nil
+end
+
+-- Session-only: see mpv-osc.lua's cycle_crt for the full rationale — cycles
+-- Off -> Regular -> Heavy live, does not persist back to the crt_filter setting.
+local function cycle_crt()
+    local idx = 1
+    for i, v in ipairs(crt_order) do
+        if v == crt_state then idx = i break end
+    end
+    crt_state = crt_order[(idx % #crt_order) + 1]
+    local path = crt_shader_path(crt_state)
+    if path then
+        mp.commandv("no-osd", "change-list", "glsl-shaders", "set", path)
+    else
+        mp.commandv("no-osd", "change-list", "glsl-shaders", "clr", "")
+    end
+end
+
 -- CROP is omitted when MpvController flags a decode path where --panscan
 -- blanks the video (Pi 3 overlay path with 1080p Playback ON).
 local buttons = {}
 if mp.get_opt("hide-crop") ~= "1" then
     buttons[#buttons + 1] = { label = "CROP", action = function() mp.command("no-osd cycle-values panscan 0 1") end }
+end
+if crt_available then
+    buttons[#buttons + 1] = { label = "CRT", action = cycle_crt }
 end
 buttons[#buttons + 1] = { label = "STOP", action = function() mp.command("quit") end }
 

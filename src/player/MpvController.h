@@ -66,6 +66,11 @@ public:
     // toggle only where the smoothness-vs-crop trade-off actually exists.
     Q_INVOKABLE bool hasSmoothPlaybackTradeoff() const;
 
+    // True when this session will launch mpv headless (--vo=drm, no DISPLAY/
+    // WAYLAND_DISPLAY — the Pi console path). Settings uses this to hide options
+    // that only take effect under mpv's gpu/gpu-next VOs (e.g. CRT Filter).
+    Q_INVOKABLE bool isHeadlessMode() const { return detectHeadlessMode(); }
+
 signals:
     void positionChanged(int ms);
     void durationChanged(int ms);
@@ -121,6 +126,14 @@ private:
     // App-level "video_output_levels" setting (default "Auto"). Returns the mpv
     // value for --video-output-levels ("limited"/"full"), or empty on Auto/unset.
     QString videoOutputLevels() const;
+    // App-level "crt_filter" setting, normalized to "Off"/"Regular"/"Heavy"
+    // (unset or unrecognized values fall back to "Off").
+    QString crtFilterState() const;
+    // Shader filename under shaders/ for the current crtFilterState(), or empty
+    // on "Off". --glsl-shaders only runs under mpv's gpu/gpu-next VOs, so this
+    // is honoured on desktop only (see loadAndPlay); the Pi headless --vo=drm
+    // paths ignore it.
+    QString crtFilterShaderFile() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;

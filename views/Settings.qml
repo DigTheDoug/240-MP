@@ -129,6 +129,22 @@ FocusScope {
             moduleId: ""
         })
 
+        // CRT Filter — glsl-shaders only run under mpv's gpu/gpu-next VOs, which the
+        // Pi headless paths intentionally avoid (they use --vo=drm to keep GPU load
+        // low). So this only has an effect on desktop (macOS, X11/Wayland desktop
+        // Linux incl. Steam Deck) and is hidden entirely elsewhere.
+        if (!mpvController.isHeadlessMode()) {
+            items.push({
+                type: "list_single",
+                key: "crt_filter",
+                label: "CRT Filter",
+                options: ["Off", "Regular", "Heavy"],
+                value: appSettings["crt_filter"] || "Off",
+                description: "Desktop only. Adds a CRT shader (curvature, scanlines, phosphor mask, glow)\n[HEAVY] Stronger curvature, scanlines, mask contrast and glow",
+                moduleId: ""
+            })
+        }
+
         // SCREEN SAVER section — single control: OFF disables, a number sets the
         // timeout for both menu idle and playback pause (handled inside mpv).
         items.push({

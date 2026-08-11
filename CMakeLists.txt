@@ -149,6 +149,7 @@ if(APPLE)
         "${CMAKE_SOURCE_DIR}/modules"
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
+        "${CMAKE_SOURCE_DIR}/shaders"
         DESTINATION "240mp.app/Contents/Resources"
         COMPONENT Runtime)
 
@@ -176,6 +177,7 @@ else()
         "${CMAKE_SOURCE_DIR}/modules"
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
+        "${CMAKE_SOURCE_DIR}/shaders"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
         COMPONENT Runtime)
 endif()

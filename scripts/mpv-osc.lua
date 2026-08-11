@@ -132,6 +132,40 @@ end
 -- (Pi 3 overlay path with 1080p Playback ON) — the CROP button would be a no-op.
 local hide_crop = mp.get_opt("hide-crop") == "1"
 
+-- Set by MpvController with the resolved shader paths and the crt_filter
+-- setting's value at launch — absent entirely on the Pi headless --vo=drm
+-- paths, where --glsl-shaders has no effect, so the button hides there.
+local crt_shader_regular = mp.get_opt("crt-shader-regular")
+local crt_shader_heavy   = mp.get_opt("crt-shader-heavy")
+local crt_available = (crt_shader_regular or "") ~= "" and (crt_shader_heavy or "") ~= ""
+local crt_order = {"Off", "Regular", "Heavy"}
+local crt_state = mp.get_opt("crt-filter-initial")
+if crt_state ~= "Regular" and crt_state ~= "Heavy" then crt_state = "Off" end
+
+local function crt_shader_path(state)
+    if state == "Regular" then return crt_shader_regular end
+    if state == "Heavy"   then return crt_shader_heavy   end
+    return nil
+end
+
+-- Session-only: cycles Off -> Regular -> Heavy live via mpv's own change-list
+-- command, the same shape as the CROP button's panscan cycle above (no
+-- round-trip to the Qt app). Does not persist back to the crt_filter setting —
+-- the next video launch reverts to whatever Settings has saved.
+local function cycle_crt()
+    local idx = 1
+    for i, v in ipairs(crt_order) do
+        if v == crt_state then idx = i break end
+    end
+    crt_state = crt_order[(idx % #crt_order) + 1]
+    local path = crt_shader_path(crt_state)
+    if path then
+        mp.commandv("no-osd", "change-list", "glsl-shaders", "set", path)
+    else
+        mp.commandv("no-osd", "change-list", "glsl-shaders", "clr", "")
+    end
+end
+
 local function build_left_btns(has_sub, has_pl, bar_w)
     local btns = {}
     if skip_active then
@@ -145,6 +179,9 @@ local function build_left_btns(has_sub, has_pl, bar_w)
     end
     if not hide_crop then
         table.insert(btns, {label="CROP", width=math.floor(bar_w * 0.090625), action=btn_actions[3]})
+    end
+    if crt_available then
+        table.insert(btns, {label="CRT", width=math.floor(bar_w * 0.090625), action=cycle_crt})
     end
     if has_pl then
         table.insert(btns, {label="<", width=math.floor(bar_w * 0.055), action=btn_actions[5]})
