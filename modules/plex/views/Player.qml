@@ -8,8 +8,11 @@ FocusScope {
     // Normally loaded inside modules/plex/views/Root.qml's Loader, which
     // provides this via its own moduleRoot id — but the remote-control
     // hand-off (Main.qml) loads this view directly, bypassing that router, so
-    // it can't rely on an ancestor id. Same literal Root.qml hardcodes.
-    property string moduleId: "com.240mp.plex"
+    // it can't rely on an ancestor id existing. `typeof` is used because a
+    // plain `moduleRoot` reference would throw when that id isn't in scope;
+    // the literal is only a fallback for that bypass case, not a second
+    // independent source of truth — Root.qml's own moduleId stays canonical.
+    property string moduleId: (typeof moduleRoot !== "undefined" && moduleRoot) ? moduleRoot.moduleId : "com.240mp.plex"
 
     signal navigateTo(string path, var params)
     signal goBack()
@@ -43,6 +46,13 @@ FocusScope {
     property int  choiceIndex:        0
     property string resumeSetting:    "ask"
     property bool pendingRetryTranscode: false
+    // Correlates the build_stream_url/request_transcode call made below with
+    // the streamUrlReady reply meant for it — plexBackend is a shared
+    // singleton, so a remote-control play triggered while a next-episode or
+    // retry-transcode call is in flight would otherwise be indistinguishable
+    // from this view's own pending call (both just look like "some
+    // streamUrlReady arrived while a pending* flag is set").
+    property string pendingRequestId: ""
 
     // Autoplay-next-episode. When enabled, a natural end-of-file advances to the
     // next episode in the same season, carrying over the audio/subtitle language.
@@ -236,7 +246,8 @@ FocusScope {
     Connections {
         target: plexBackend
         function onErrorOccurred(msg) { console.log("[Player] Backend error: " + msg) }
-        function onStreamUrlReady(url, plexToken) {
+        function onStreamUrlReady(url, plexToken, requestId) {
+            if (requestId !== playerRoot.pendingRequestId) return
             if (pendingNextEpisode) {
                 // Stream URL for the auto-advanced next episode just arrived.
                 pendingNextEpisode = false
@@ -324,13 +335,15 @@ FocusScope {
             plexBackend.set_subtitle_stream(subId, partId)
         }
 
-        // Both paths resolve through onStreamUrlReady, which checks this flag.
-        // build_stream_url emits synchronously, so the flag must be set first.
+        // Both paths resolve through onStreamUrlReady, which checks this flag
+        // and pendingRequestId. build_stream_url emits synchronously, so both
+        // must be set first.
         pendingNextEpisode = true
+        pendingRequestId = newSessionId()
         if (isTranscoding) {
-            plexBackend.request_transcode(ratingKey, partKey, sessionId, audioId, subId, 0)
+            plexBackend.request_transcode(ratingKey, partKey, sessionId, audioId, subId, 0, pendingRequestId)
         } else {
-            plexBackend.build_stream_url(ratingKey, partKey, sessionId)
+            plexBackend.build_stream_url(ratingKey, partKey, sessionId, pendingRequestId)
         }
     }
 
@@ -355,9 +368,10 @@ FocusScope {
                     // Direct play failed (e.g. HTTP 500 from PMS on WAN). Retry
                     // transparently with transcoding at the same resume offset.
                     pendingRetryTranscode = true
+                    pendingRequestId = newSessionId()
                     plexBackend.request_transcode(ratingKey, partKey, sessionId,
                                                   selectedAudioId, selectedSubtitleId,
-                                                  0)
+                                                  0, pendingRequestId)
                 } else {
                     goBack()
                 }

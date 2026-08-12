@@ -7,6 +7,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QRandomGenerator>
+#include <QTimer>
 #include <QDebug>
 
 // ---------------------------------------------------------------------------
@@ -77,9 +78,14 @@ QString RemoteControlBackend::loadOrCreateToken() const {
 QString RemoteControlBackend::generateToken() {
     // 8 hex chars (32 bits) rather than a full 128-bit token: this is read off
     // a TV screen and hand-typed into a Home Assistant config on another
-    // device, so easy transcription matters more than resisting brute force —
-    // the listener is LAN-only and every attempt is visible in the command
-    // log regardless.
+    // device, so easy transcription matters more than resisting brute force.
+    // Note this is a real tradeoff, not a free one: startListening() binds
+    // every interface on the host (not just the LAN NIC), so anyone who can
+    // reach this port on any interface — including a VPN/Tailscale interface,
+    // if one is present — can attempt this token. Every attempt, accepted or
+    // rejected, is visible in the command log, but on an untrusted or
+    // internet-exposed network this port should be firewalled rather than
+    // relying on the token alone.
     static const char kHex[] = "0123456789abcdef";
     static constexpr int kTokenLength = 8;
     QString token;
@@ -87,6 +93,16 @@ QString RemoteControlBackend::generateToken() {
     for (int i = 0; i < kTokenLength; ++i)
         token.append(QLatin1Char(kHex[QRandomGenerator::global()->bounded(16)]));
     return token;
+}
+
+bool RemoteControlBackend::constantTimeEquals(const QString &a, const QString &b) {
+    const QByteArray ba = a.toUtf8();
+    const QByteArray bb = b.toUtf8();
+    if (ba.size() != bb.size()) return false;
+    char diff = 0;
+    for (int i = 0; i < ba.size(); ++i)
+        diff |= (ba[i] ^ bb[i]);
+    return diff == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +125,9 @@ void RemoteControlBackend::setListeningEnabled(bool enabled) {
 void RemoteControlBackend::startListening() {
     if (m_server->isListening()) return;
 
+    // Binds every interface (not just the LAN NIC) so this works regardless
+    // of which interface the LAN happens to be on — see generateToken() for
+    // the token-strength tradeoff this implies.
     if (!m_server->listen(QHostAddress::Any, kPort)) {
         m_lastError = m_server->errorString();
         qWarning("[RemoteControl] Failed to listen on port %d: %s",
@@ -152,10 +171,26 @@ void RemoteControlBackend::onSettingChanged(const QString &moduleId, const QStri
 void RemoteControlBackend::handleNewConnection() {
     while (m_server->hasPendingConnections()) {
         QTcpSocket *socket = m_server->nextPendingConnection();
+
+        if (m_openConnections >= kMaxConcurrentConnections) {
+            socket->disconnectFromHost();
+            socket->deleteLater();
+            continue;
+        }
+        ++m_openConnections;
+
         connect(socket, &QTcpSocket::readyRead, this, &RemoteControlBackend::onSocketReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, [this, socket]() {
+            --m_openConnections;
             m_buffers.remove(socket);
             socket->deleteLater();
+        });
+
+        // A socket that's accepted but never completes (or never sends) a
+        // request line would otherwise stay open forever.
+        QTimer::singleShot(kIdleTimeoutMs, socket, [socket]() {
+            if (socket->state() == QAbstractSocket::ConnectedState)
+                socket->disconnectFromHost();
         });
     }
 }
@@ -167,20 +202,29 @@ void RemoteControlBackend::onSocketReadyRead() {
     QByteArray &buf = m_buffers[socket];
     buf.append(socket->readAll());
 
+    // Checked before searching for the terminator: a single write that
+    // already contains "\r\n" inside an oversized payload must not bypass
+    // this by finding its terminator before the length is ever checked.
+    if (buf.size() > kMaxRequestLineBytes) {
+        m_buffers.remove(socket);
+        socket->disconnectFromHost();
+        return;
+    }
+
     // We only need the request line (this is a GET-only, body-less protocol),
     // so the rest of the headers — if any — are left unread and discarded
     // when the socket closes.
     const int lineEnd = buf.indexOf("\r\n");
     if (lineEnd < 0) {
-        if (buf.size() > kMaxRequestLineBytes) {
-            m_buffers.remove(socket);
-            socket->disconnectFromHost();
-        }
         return;
     }
 
     const QString requestLine = QString::fromUtf8(buf.left(lineEnd));
     m_buffers.remove(socket);
+    // The request line is all this protocol needs; stop reacting to any
+    // further bytes on this socket (e.g. headers arriving in a later TCP
+    // segment) so they can't be misread as a second request.
+    disconnect(socket, &QTcpSocket::readyRead, this, &RemoteControlBackend::onSocketReadyRead);
     handleRequestLine(socket, requestLine);
 }
 
@@ -208,7 +252,7 @@ void RemoteControlBackend::handleRequestLine(QTcpSocket *socket, const QString &
     // Token check first: an attacker probing the endpoint shouldn't be able
     // to distinguish "bad token" from "bad params" by response shape alone
     // mattering, and it keeps the log's accepted/rejected reason unambiguous.
-    if (token != m_token) {
+    if (!constantTimeEquals(token, m_token)) {
         appendLogEntry(timestamp, sourceIp, service, ratingKey, false);
         sendResponse(socket, 403, "error", "bad token");
         return;

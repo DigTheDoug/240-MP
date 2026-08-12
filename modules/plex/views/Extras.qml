@@ -26,6 +26,13 @@ FocusScope {
     // instead of reusing the prior one (mirrors Item.qml).
     property string sessionId: ""
 
+    // Correlates the build_stream_url/request_transcode call below with the
+    // streamUrlReady reply meant for it — plexBackend is a shared singleton,
+    // so a remote-control play triggered while an extra's stream is being
+    // resolved would otherwise be indistinguishable from this view's own
+    // pending call (launchingExtra alone can't tell them apart).
+    property string pendingRequestId: ""
+
     function newSessionId() {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         var id = ""
@@ -47,7 +54,8 @@ FocusScope {
             itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
         }
 
-        function onStreamUrlReady(url, plexToken) {
+        function onStreamUrlReady(url, plexToken, requestId) {
+            if (requestId !== extrasRoot.pendingRequestId) return
             var d = extrasRoot.launchingExtra
             if (!d) return
 
@@ -124,6 +132,7 @@ FocusScope {
         if (!d) return
         launchingExtra = d
         sessionId = newSessionId()
+        pendingRequestId = newSessionId()
         // No track persistence here: extras play with the server's default
         // audio/subtitle selection (there is no track UI on this screen).
         if (d.forceTranscode) {
@@ -131,9 +140,9 @@ FocusScope {
             // the Player resumes by seeking mpv to viewOffset (see Item.qml).
             plexBackend.request_transcode(d.ratingKey, d.partKey, sessionId,
                                           d.selectedAudioId || "",
-                                          d.selectedSubtitleId || "0", 0)
+                                          d.selectedSubtitleId || "0", 0, pendingRequestId)
         } else {
-            plexBackend.build_stream_url(d.ratingKey, d.partKey, sessionId)
+            plexBackend.build_stream_url(d.ratingKey, d.partKey, sessionId, pendingRequestId)
         }
     }
     Keys.onPressed: function(event) {

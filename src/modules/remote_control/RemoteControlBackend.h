@@ -13,7 +13,10 @@
 //
 //   GET /play?service=plex&ratingKey=<key>&token=<token>
 //
-// See REMOTE_CONTROL_DESIGN.md for the full protocol/auth/log design.
+// Auth is the token query param, checked against a locally generated token
+// persisted to remote_control_token.json (0600 perms). Every request, accepted
+// or rejected, is appended to an in-memory, most-recent-first log capped at 50
+// entries (see appendLogEntry / getCommandLog), surfaced live in Root.qml.
 class RemoteControlBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool listening READ listening NOTIFY listeningChanged)
@@ -56,7 +59,16 @@ private:
     static constexpr int kPort = 8420;
     // Guards against a client that never sends a full request line (slow-loris
     // style) — drop the connection rather than growing the buffer forever.
+    // Checked on every read regardless of whether a terminator has arrived
+    // yet, so a single write already containing "\r\n" can't bypass it.
     static constexpr int kMaxRequestLineBytes = 8192;
+    // A connection that never completes a request line within this window is
+    // dropped rather than held open indefinitely.
+    static constexpr int kIdleTimeoutMs = 5000;
+    // Caps concurrently-open sockets so a client can't exhaust file
+    // descriptors/memory by opening many connections and sending little or
+    // nothing on each.
+    static constexpr int kMaxConcurrentConnections = 64;
 
     void setListeningEnabled(bool enabled);
     void startListening();
@@ -70,6 +82,11 @@ private:
 
     QString loadOrCreateToken() const;
     static QString generateToken();
+    // Fixed-time comparison so a mismatching token can't be distinguished by
+    // how much of it matched (the length check is not timing-sensitive since
+    // the expected length is already public — it's in this file and the app's
+    // own Root.qml display).
+    static bool constantTimeEquals(const QString &a, const QString &b);
 
     QString m_dataRoot;
     QString m_token;
@@ -78,4 +95,5 @@ private:
     QTcpServer *m_server;
     QHash<QTcpSocket *, QByteArray> m_buffers;
     QList<QVariantMap> m_commandLog;
+    int m_openConnections = 0;
 };

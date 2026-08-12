@@ -271,10 +271,14 @@ Window {
     // com.240mp.remote_control's HTTP listener hands off a bare ratingKey;
     // this drives it through the same load-detail -> resolve-stream ->
     // navigate chain modules/plex/views/Item.qml uses for its own play
-    // button (see REMOTE_CONTROL_DESIGN.md). PlexBackend is a single shared
-    // instance, so these Connections fire alongside any Item.qml-local ones
-    // whenever that view happens to be open — _pendingRequestId (echoed back
-    // on itemLoaded/streamUrlReady/itemRequestFailed) is what keeps this
+    // button (see onItemLoaded/onStreamUrlReady there), reimplemented here
+    // rather than shared because this view has no user-picked audio/subtitle
+    // selection to read — it uses Plex's server-side defaults instead. If
+    // Item.qml's play-launch logic changes, check whether this block needs
+    // the same change. PlexBackend is a single shared instance, so these
+    // Connections fire alongside any Item.qml-local ones whenever that view
+    // happens to be open — _pendingRequestId (echoed back on
+    // itemLoaded/streamUrlReady/itemRequestFailed) is what keeps this
     // handler from reacting to replies meant for a local Item.qml call
     // instead of this one, and vice versa. A ratingKey/truthiness check alone
     // can't tell those apart since plexBackend's signals carry no caller
